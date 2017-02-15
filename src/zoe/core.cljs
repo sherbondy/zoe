@@ -1,45 +1,88 @@
-(ns zoe.core)
+(ns zoe.core
+  (:require [reagent.core :as r]))
 
 (enable-console-print!)
 
 (println "hello zoetrope.")
 
 
+(def gui (.getElementById js/document "gui"))
 (def canvas (.getElementById js/document "canvas"))
-(def w 640 #_(.-innerWidth js/window))
+(def w 480 #_(.-innerWidth js/window))
 (def h 480 #_(.-innerHeight js/window))
-(set! (.-width canvas) (* w 2))
-(set! (.-height canvas) (* h 2))
-(set! (.. canvas -style -width) (str w "px"))
-(set! (.. canvas -style -height) (str h "px"))
-
 (def px-ratio (or (.-devicePixelRatio js/window) 1))
-
 (def ctx (.getContext canvas "2d"))
-(.scale ctx px-ratio px-ratio)
-(def img-data (.getImageData ctx 0 0 w h))
 
-;; we are going to maintain a typed array with the drawing contents buffer
-;; then we will blit additional ui on top of this (e.g. pointer hover cursor)
-(def drawing-buf (js/ArrayBuffer. (.. img-data -data -length)))
-
-;; two typed-array views into the drawing data buffer
-(def drawing-buf8 (js/Uint8ClampedArray. drawing-buf))
-(def drawing-data (js/Uint32Array. drawing-buf))
-
-(aset drawing-data 1 0x0a0b0c0d)
-(def little-endian? true)
-(when (and
-        (= (aget drawing-buf8 4) 0x0a)
-        (= (aget drawing-buf8 5) 0x0b)
-        (= (aget drawing-buf8 6) 0x0c)
-        (= (aget drawing-buf8 7) 0x0d))
-  (set! little-endian? false))
+(defonce app-state
+  (r/atom
+    {:current-frame 0
+     ;; a vector of typed arrays...
+     :frames []
+     ;; a vector of image data url encoded values
+     ;; to display thumbnail frame previews
+     :thumbnails []}))
 
 
-(def prev-point-x nil)
-(def prev-point-y nil)
+(defn handle-pointer-up [e]
+  (let [img-data (.createImageData ctx (.-width canvas) (.-height canvas))]
+    ;; we need to explicitly copy the image data
+    ;; otherwise, we would just be storing a pointer...
+    (.set (.-data img-data)
+          (.-data (.getImageData ctx 0 0 (.-width canvas) (.-height canvas))))
 
+    (swap! app-state
+           (fn [s]
+             (-> s
+                 (assoc-in
+                   [:thumbnails (:current-frame s)]
+                   (.toDataURL canvas "img/png"))
+                 (assoc-in
+                   [:frames (:current-frame s)]
+                   (.-data img-data)))))))
+
+
+(defn add-frame [e]
+  (.clearRect ctx 0 0 (.-width canvas) (.-height canvas))
+  (swap! app-state
+         (fn [s]
+           (assoc s :current-frame
+                    (count (:frames s)))))
+  (handle-pointer-up nil))
+
+
+(defn change-frame! [i]
+  (let [img-data (.createImageData ctx (.-width canvas) (.-height canvas))]
+    (.clearRect ctx 0 0 (.-width canvas) (.-height canvas))
+    (.set (.-data img-data) (get-in @app-state [:frames i]))
+    (.putImageData ctx img-data 0 0)
+    (swap! app-state assoc :current-frame i)))
+
+
+(defn timeline []
+  [:div#timeline
+   (let [thumbnails (:thumbnails @app-state)]
+     (doall
+       (for [i (range (count thumbnails))]
+         [:img {:id (str "frame-" i)
+                :key (str "frame-" i)
+                :width 48 :height 48
+                :on-click #(change-frame! i)
+                :class (when (= i (:current-frame @app-state)) "active")
+                :src (nth thumbnails i)}])))
+   [:button {:id "add-frame"
+             :on-click add-frame}
+    "Add Frame"]])
+
+
+(defn setup-canvas []
+  (set! (.-width canvas) (* w 2))
+  (set! (.-height canvas) (* h 2))
+  (set! (.. canvas -style -width) (str w "px"))
+  (set! (.. canvas -style -height) (str h "px"))
+  (.scale ctx px-ratio px-ratio))
+
+
+;(def img-data (.getImageData ctx 0 0 w h))
 ;(aset drawing-data
 ;      (+ (* y w) x)
 ;      (bit-or
@@ -51,9 +94,36 @@
 ;;; probably much faster to only put the single pixel that changed?
 ;(.putImageData ctx img-data 0 0))
 
+;; we are going to maintain a typed array with the drawing contents buffer
+;; then we will blit additional ui on top of this (e.g. pointer hover cursor)
+;(def drawing-buf (js/ArrayBuffer. (.. img-data -data -length)))
+;
+;;; two typed-array views into the drawing data buffer
+;(def drawing-buf8 (js/Uint8ClampedArray. drawing-buf))
+;(def drawing-data (js/Uint32Array. drawing-buf))
+
+(def little-endian? true)
+
+(defn test-endianness []
+  (let [img-data (.createImageData ctx 1 1)
+        drawing-buf (js/ArrayBuffer. (.. img-data -data -length))
+        drawing-buf8 (js/Uint8ClampedArray. drawing-buf)
+        drawing-data (js/Uint32Array. drawing-buf)]
+    (aset drawing-data 1 0x0a0b0c0d)
+    (when (and
+            (= (aget drawing-buf8 4) 0x0a)
+            (= (aget drawing-buf8 5) 0x0b)
+            (= (aget drawing-buf8 6) 0x0c)
+            (= (aget drawing-buf8 7) 0x0d))
+      (set! little-endian? false))))
+
+
+(def prev-point-x nil)
+(def prev-point-y nil)
+
 (defn handle-pointer-move [e]
-  (let [x (js/Math.round (.-pageX e))
-        y (js/Math.round (.-pageY e))
+  (let [x (js/Math.round (- (.-pageX e) (.-offsetLeft canvas)))
+        y (js/Math.round (- (.-pageY e) (.-offsetTop canvas)))
         pressure (or (.-pressure e) 0)]
     (when-not (= (.-pointerType e) "touch")
       (when (> pressure 0)
@@ -88,17 +158,25 @@
       (.arc ctx x y (.-width e) 0 (* js/Math.PI 2))
       (.fill ctx))
 
-    (println (.-pointerType e) x y pressure (.-width e) (.-height e))))
+    #_(println (.-pointerType e) x y pressure (.-width e) (.-height e))))
 
 (defn cancel-event [e]
   (.preventDefault e)
   (.stopPropagation e)
   false)
 
+
 (defonce init
   (do
+    (setup-canvas)
+    (test-endianness)
+    ;; initialize empty frame
+    (handle-pointer-up nil)
+
     (.addEventListener canvas "pointermove" handle-pointer-move)
     ;; on pointer up, we should save the ctx diff for undo/redo...
     (.addEventListener canvas "pointerup" handle-pointer-move)
+    (.addEventListener canvas "pointerup" handle-pointer-up)
     (.addEventListener canvas "pointerdown" handle-pointer-move)
-    (.addEventListener js/window "contextmenu" cancel-event)))
+    (.addEventListener js/window "contextmenu" cancel-event)
+    (r/render-component [timeline] gui)))

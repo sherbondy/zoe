@@ -1,8 +1,24 @@
 #canvas {
-  position: absolute;
-  top:0;
-  left:0;
   border: 1px solid #ccc;
   /* disable browser zoom and such */
   touch-action: none;
+}
+
+#timeline {
+  overflow: hidden;
+}
+
+#timeline img {
+  border: 1px solid #ccc;
+  margin-right: 16px;
+  display: block;
+  float: left;
+}
+
+#add-frame {
+  box-sizing: border-box;
+  width: 64px;
+  height: 64px;
+  display: block;
+  float: right;
 }
