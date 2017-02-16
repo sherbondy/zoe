@@ -17,6 +17,7 @@
   (r/atom
     {:current-frame 0
      ;; a vector of typed arrays...
+     :playing? false
      :frames []
      ;; a vector of image data url encoded values
      ;; to display thumbnail frame previews
@@ -57,9 +58,15 @@
     (.putImageData ctx img-data 0 0)
     (swap! app-state assoc :current-frame i)))
 
+(defn play-pause! []
+  (swap! app-state update :playing? not))
 
 (defn timeline []
   [:div#timeline
+   [:button {:id "play-pause"
+             :on-click play-pause!}
+    (if (:playing? @app-state) "Pause" "Play")]
+
    (let [thumbnails (:thumbnails @app-state)]
      (doall
        (for [i (range (count thumbnails))]
@@ -165,6 +172,13 @@
   (.stopPropagation e)
   false)
 
+(defn cycle-animation []
+  (let [s @app-state]
+    (when (:playing? s)
+      (if (< (inc (:current-frame s)) (count (:frames s)))
+        (change-frame! (inc (:current-frame s)))
+        (change-frame! 0)))))
+
 
 (defonce init
   (do
@@ -179,4 +193,6 @@
     (.addEventListener canvas "pointerup" handle-pointer-up)
     (.addEventListener canvas "pointerdown" handle-pointer-move)
     (.addEventListener js/window "contextmenu" cancel-event)
-    (r/render-component [timeline] gui)))
+    (r/render-component [timeline] gui)
+
+    (js/setInterval cycle-animation 100)))
